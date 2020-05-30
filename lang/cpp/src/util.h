@@ -81,8 +81,11 @@ static inline gpgme_keylist_mode_t add_to_gpgme_keylist_mode_t(unsigned int oldm
     if (newmodes & GpgME::WithTofu) {
         oldmode |= GPGME_KEYLIST_MODE_WITH_TOFU;
     }
+    if (newmodes & GpgME::ResolveAliases) {
+        oldmode |= GPGME_KEYLIST_MODE_RESOLVE_ALIASES;
+    }
 #ifndef NDEBUG
-    if (newmodes & ~(GpgME::Local | GpgME::Extern | GpgME::Signatures | GpgME::SignatureNotations | GpgME::Ephemeral | GpgME::Validate)) {
+    if (newmodes & ~(GpgME::Local | GpgME::Extern | GpgME::Signatures | GpgME::SignatureNotations | GpgME::Ephemeral | GpgME::Validate | GpgME::ResolveAliases)) {
         //std::cerr << "GpgME::Context: keylist mode must be one of Local, "
         //"Extern, Signatures, SignatureNotations, or Validate, or a combination thereof!" << std::endl;
     }

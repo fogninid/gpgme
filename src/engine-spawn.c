@@ -480,5 +480,6 @@ struct engine_ops _gpgme_engine_ops_spawn =
     NULL,               /* cancel_op */
     NULL,               /* passwd */
     NULL,               /* set_pinentry_mode */
-    engspawn_op_spawn   /* opspawn */
+    engspawn_op_spawn,  /* opspawn */
+    NULL                /* get_alias */
   };

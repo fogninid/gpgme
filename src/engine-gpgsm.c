@@ -2338,5 +2338,6 @@ struct engine_ops _gpgme_engine_ops_gpgsm =
     NULL,		/* cancel_op */
     gpgsm_passwd,
     NULL,               /* set_pinentry_mode */
-    NULL                /* opspawn */
+    NULL,               /* opspawn */
+    NULL                /* get_alias */
   };

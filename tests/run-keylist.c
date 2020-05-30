@@ -56,6 +56,7 @@ show_usage (int ex)
          "  --sig-notations  use GPGME_KEYLIST_MODE_SIG_NOTATIONS\n"
          "  --ephemeral      use GPGME_KEYLIST_MODE_EPHEMERAL\n"
          "  --validate       use GPGME_KEYLIST_MODE_VALIDATE\n"
+         "  --aliases        use GPGME_KEYLIST_MODE_RESOLVE_ALIASES\n"
          "  --import         import all keys\n"
          "  --offline        use offline mode\n"
          "  --from-file      list all keys in the given file\n"
@@ -88,7 +89,7 @@ isotimestr (unsigned long value)
 
 
 int
-main (int argc, char **argv)
+main (int argc, const char **argv)
 {
   int last_argc = -1;
   gpgme_error_t err;
@@ -182,6 +183,11 @@ main (int argc, char **argv)
           mode |= GPGME_KEYLIST_MODE_WITH_SECRET;
           argc--; argv++;
         }
+      else if (!strcmp (*argv, "--aliases"))
+        {
+          mode |= GPGME_KEYLIST_MODE_RESOLVE_ALIASES;
+          argc--; argv++;
+        }
       else if (!strcmp (*argv, "--import"))
         {
           import = 1;
@@ -223,11 +229,6 @@ main (int argc, char **argv)
         show_usage (1);
     }
 
-  if (argc > 1)
-    show_usage (1);
-  else if (from_file && !argc)
-    show_usage (1);
-
   init_gpgme (protocol);
 
   err = gpgme_new (&ctx);
@@ -259,7 +260,14 @@ main (int argc, char **argv)
       err = gpgme_op_keylist_from_data_start (ctx, data, 0);
     }
   else
-    err = gpgme_op_keylist_start (ctx, argc? argv[0]:NULL, only_secret);
+    {
+      if (argc > 1) {
+        err = gpgme_op_keylist_ext_start(ctx, argv, only_secret, 0);
+      } else {
+        err = gpgme_op_keylist_start(ctx, argc? argv[0] : NULL, only_secret);
+      }
+    }
+
   fail_if_err (err);
 
   while (!(err = gpgme_op_keylist_next (ctx, &key)))

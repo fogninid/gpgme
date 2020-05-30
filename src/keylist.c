@@ -71,6 +71,14 @@ typedef struct
   struct key_queue_item_s *key_queue;
 } *op_data_t;
 
+typedef struct {
+  int avaliable;
+  size_t aliases_buf_size;
+  size_t aliases_count;
+  const char* name;
+  const char** names;
+  char** aliases;
+} * aliases_opd;
 
 static void
 release_op_data (void *hook)
@@ -543,6 +551,111 @@ finish_key (gpgme_ctx_t ctx, op_data_t opd)
     _gpgme_engine_io_event (ctx->engine, GPGME_EVENT_NEXT_KEY, key);
 }
 
+static char* find_group_def(char* line, const char* name) {
+  size_t name_len = strlen(name);
+  char* ptr = strstr(line, "group:");
+  int unquoting = 0;
+
+  if (!ptr)
+    return 0;
+
+  ptr += 6; // strlen("group:");
+
+  if (*ptr == '<' && *name != '<') {
+    ptr++;
+    unquoting = 1;
+  }
+
+  if (strncmp(ptr, name, name_len))
+    return 0;
+
+  ptr += name_len;
+
+  if (*ptr == '>' && unquoting)
+    ptr++;
+
+  if (*ptr != ':')
+    return 0;
+
+  ++ptr;
+  if (!*ptr)
+    return 0;
+
+  return ptr;
+}
+
+static char* find_group_def_any_of(char* line, const char** names) {
+  const char** name;
+  char* ptr = NULL;
+
+  for (name = names; *name; ++name)
+    if ((ptr = find_group_def(line, *name)))
+      break;
+
+  /* remove name from names by swapping with the last element and setting NULL */
+  if (ptr) {
+    const char **last = name, **tmp;
+    for (tmp = name; *tmp; ++tmp)
+      last = tmp;
+
+    if (last != name) {
+      *name = *last;
+    }
+    *last = NULL;
+  }
+
+  return ptr;
+}
+
+static gpgme_error_t
+aliaslist_colon_handler (void *priv, char *line) {
+  aliases_opd opd = priv;
+  char* ptr;
+  char* current_begin;
+
+  if (!opd->aliases) {
+    opd->aliases_buf_size = 4;
+    opd->aliases_count = 0;
+    opd->aliases = malloc(opd->aliases_buf_size * sizeof(char*));
+
+    if (!opd->aliases)
+      return gpgme_error_from_syserror();
+  }
+
+  if (!line || (!opd->name && (!opd->names || !*(opd->names)))) {
+    opd->avaliable = 1;
+  } else {
+    if (opd->name) {
+      ptr = find_group_def(line, opd->name);
+      if (ptr)
+        opd->name = NULL;
+    } else {
+      ptr = find_group_def_any_of(line, opd->names);
+    }
+    if (!ptr)
+      return 0;
+
+    current_begin = ptr;
+
+    while ( (ptr = strstr(ptr, ";")) ) {
+      *ptr = '\0';
+      opd->aliases[opd->aliases_count++] = strdup(current_begin);
+
+      if (opd->aliases_count == opd->aliases_buf_size) {
+        opd->aliases_buf_size *= 2;
+        opd->aliases = realloc(opd->aliases, opd->aliases_buf_size * sizeof(char*));
+        if (!opd->aliases)
+          return gpgme_error_from_syserror(); // TODO free old
+      }
+
+      ++ptr;
+      current_begin = ptr;
+    }
+    opd->aliases[opd->aliases_count++] = strdup(current_begin);
+  }
+
+  return 0;
+}
 
 /* Note: We are allowed to modify LINE.  */
 static gpgme_error_t
@@ -1073,6 +1186,156 @@ _gpgme_op_keylist_event_cb (void *data, gpgme_event_io_t type, void *type_data)
   opd->key_cond = 1;
 }
 
+static void aliases_cleanup(void* hook) {
+  aliases_opd opd = hook;
+
+  if (opd->aliases) {
+    size_t i;
+    for (i=0; i<opd->aliases_count; ++i) {
+      free(opd->aliases[i]);
+    }
+
+    free(opd->aliases);
+  }
+
+  if (opd->name)
+    free((void*)opd->name);
+
+  if (opd->names) {
+    const char** ptr;
+    for (ptr = opd->names; *ptr; ptr++)
+      free((void *)*ptr);
+    free(opd->names);
+  }
+}
+
+static const char** copy_names(const char** names) {
+  const char **copy;
+  size_t names_count = 0;
+  size_t i;
+
+  for (copy = names; *copy; ++copy)
+    names_count++;
+
+  copy = malloc((names_count + 1) * sizeof(char*));
+
+  if (copy) {
+    for (i=0; i<names_count; ++i) {
+      copy[i] = strdup(names[i]);
+      if (!copy[i])
+        goto err;
+    }
+    copy[names_count] = NULL;
+  }
+
+  return copy;
+
+err:
+  for (; i>=1; --i) {
+    free((void*)copy[i-1]);
+  }
+  free((void*)copy);
+
+  return NULL;
+}
+
+static const char** aliases_make_patterns(aliases_opd opd) {
+  size_t aliases_count = opd->aliases_count;
+  size_t names_count = 0;
+  const char **names;
+  int name_count = opd->name ? 1 : 0;
+  size_t i;
+  const char** patterns;
+
+  for (names = opd->names; names && *names; ++names)
+    names_count++;
+
+  patterns = malloc((aliases_count + names_count + name_count + 1) * sizeof(char*));
+
+  if (!patterns)
+    return NULL;
+
+  for (i=0; i<aliases_count; ++i)
+    patterns[i] = strdup(opd->aliases[i]);
+
+  for (i=0; i<names_count; ++i)
+    patterns[i + aliases_count] = strdup(opd->names[i]);
+
+  if (name_count)
+    patterns[names_count + aliases_count] = strdup(opd->name);
+
+  patterns[aliases_count + names_count + name_count] = NULL;
+
+  return patterns;
+}
+
+static void aliases_cleanup_patterns(const char** patterns) {
+  const char** tmp;
+  for (tmp = patterns; *tmp; ++tmp)
+    free((void*)*tmp);
+
+  free((void*)patterns);
+}
+
+static gpgme_error_t do_replace_aliases(gpgme_ctx_t ctx,
+                                     const char* name, const char *names[],
+                                     const char*** rv) {
+  gpgme_error_t err;
+  aliases_opd opd;
+  void* hook;
+  const char** patterns;
+
+  if (!names && !name)
+    return gpgme_error(GPG_ERR_INV_ARG);
+
+  TRACE_BEG (DEBUG_CTX, "gpgme_op_aliaskeylist_ext_start", ctx);
+
+  if (!ctx)
+    return TRACE_ERR (gpg_error (GPG_ERR_INV_VALUE));
+
+  err = _gpgme_op_reset (ctx, 2);
+  if (err)
+    return TRACE_ERR (err);
+
+
+  err = _gpgme_op_data_lookup (ctx, OPDATA_ALIAS, &hook, sizeof(*opd), aliases_cleanup);
+
+  if (err)
+    return TRACE_ERR (err);
+
+  opd = hook;
+  if (names) {
+    opd->names = copy_names(names);
+  }
+  if (name) {
+    opd->name = strdup(name);
+  }
+
+  _gpgme_engine_set_colon_line_handler (ctx->engine, aliaslist_colon_handler, opd);
+
+  err = _gpgme_engine_op_aliaslist (ctx->engine);
+
+  if (err)
+    return TRACE_ERR (err);
+
+  if (!opd->aliases) {
+    err = _gpgme_wait_on_condition (ctx, &opd->avaliable, NULL);
+    if (err)
+      return TRACE_ERR (err);
+  }
+
+  if (!opd->aliases)
+    return gpg_error(GPG_ERR_UNEXPECTED);
+
+  patterns = aliases_make_patterns(opd);
+
+  if (!patterns)
+    return gpgme_error_from_syserror();
+
+  *rv = patterns;
+
+  return 0;
+}
 
 /* Start a keylist operation within CTX, searching for keys which
    match PATTERN.  If SECRET_ONLY is true, only secret keys are
@@ -1084,12 +1347,27 @@ gpgme_op_keylist_start (gpgme_ctx_t ctx, const char *pattern, int secret_only)
   void *hook;
   op_data_t opd;
   int flags = 0;
+  const int replace_aliases = ctx->keylist_mode & GPGME_KEYLIST_MODE_RESOLVE_ALIASES;
+  const char** patterns = NULL;
 
   TRACE_BEG  (DEBUG_CTX, "gpgme_op_keylist_start", ctx,
 	      "pattern=%s, secret_only=%i", pattern, secret_only);
 
   if (!ctx)
     return TRACE_ERR (gpg_error (GPG_ERR_INV_VALUE));
+
+  if (replace_aliases && pattern) {
+    if(!do_replace_aliases(ctx, pattern, NULL, &patterns)) {
+      if (*patterns && !*(patterns+1)) {
+        pattern = *patterns;
+      } else {
+        err = gpgme_op_keylist_ext_start(ctx, patterns, secret_only, 0);
+        aliases_cleanup_patterns(patterns);
+
+        return TRACE_ERR(err);
+      }
+    }
+  }
 
   err = _gpgme_op_reset (ctx, 2);
   if (err)
@@ -1113,6 +1391,10 @@ gpgme_op_keylist_start (gpgme_ctx_t ctx, const char *pattern, int secret_only)
 
   err = _gpgme_engine_op_keylist (ctx->engine, pattern, secret_only,
 				  ctx->keylist_mode, flags);
+
+  if (replace_aliases && patterns)
+    aliases_cleanup_patterns(patterns);
+
   return TRACE_ERR (err);
 }
 
@@ -1128,12 +1410,19 @@ gpgme_op_keylist_ext_start (gpgme_ctx_t ctx, const char *pattern[],
   void *hook;
   op_data_t opd;
   int flags = 0;
+  const char** patterns = NULL;
+  const int replace_aliases = ctx->keylist_mode & GPGME_KEYLIST_MODE_RESOLVE_ALIASES;
 
   TRACE_BEG  (DEBUG_CTX, "gpgme_op_keylist_ext_start", ctx,
 	      "secret_only=%i, reserved=0x%x", secret_only, reserved);
 
   if (!ctx)
     return TRACE_ERR (gpg_error (GPG_ERR_INV_VALUE));
+
+  if (replace_aliases && pattern) {
+    if (!do_replace_aliases(ctx, NULL, pattern, &patterns))
+      pattern = patterns;
+  }
 
   err = _gpgme_op_reset (ctx, 2);
   if (err)
@@ -1157,6 +1446,10 @@ gpgme_op_keylist_ext_start (gpgme_ctx_t ctx, const char *pattern[],
   err = _gpgme_engine_op_keylist_ext (ctx->engine, pattern, secret_only,
 				      reserved, ctx->keylist_mode,
 				      flags);
+
+  if (replace_aliases && patterns)
+    aliases_cleanup_patterns(patterns);
+
   return TRACE_ERR (err);
 }
 

@@ -142,6 +142,7 @@ gpgme_error_t _gpgme_engine_op_keylist (engine_t engine,
 					int secret_only,
 					gpgme_keylist_mode_t mode,
 					int engine_flags);
+gpgme_error_t _gpgme_engine_op_aliaslist (engine_t engine);
 gpgme_error_t _gpgme_engine_op_keylist_ext (engine_t engine,
 					    const char *pattern[],
 					    int secret_only,

@@ -316,8 +316,8 @@ gpgconf_read (void *engine, const char *arg1, char *arg2,
 
           if (linelen <  8 * 1024 - 1)
             linebufsize = 8 * 1024;
-          else if (linelen < 64 * 1024 - 1)
-            linebufsize = 64 * 1024;
+          else if (linelen < 128 * 1024 - 1)
+            linebufsize = 128 * 1024;
           else
             {
               /* We reached our limit - give up.  */
@@ -1318,5 +1318,6 @@ struct engine_ops _gpgme_engine_ops_gpgconf =
     NULL,               /* cancel_op */
     NULL,               /* passwd */
     NULL,               /* set_pinentry_mode */
-    NULL                /* opspawn */
+    NULL,               /* opspawn */
+    NULL                /* get_alias */
   };

@@ -851,6 +851,18 @@ _gpgme_engine_op_import (engine_t engine, gpgme_data_t keydata,
   return (*engine->ops->import) (engine->engine, keydata, keyarray);
 }
 
+gpgme_error_t
+_gpgme_engine_op_aliaslist (engine_t engine)
+{
+  if (!engine)
+    return gpg_error (GPG_ERR_INV_VALUE);
+
+  if (!engine->ops->get_aliases)
+    return gpg_error (GPG_ERR_NOT_IMPLEMENTED);
+
+  return (*engine->ops->get_aliases) (engine->engine);
+}
+
 
 gpgme_error_t
 _gpgme_engine_op_keylist (engine_t engine, const char *pattern,

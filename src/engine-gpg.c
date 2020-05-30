@@ -3097,6 +3097,25 @@ gpg_keylist_ext (void *engine, const char *pattern[], int secret_only,
   return err;
 }
 
+static gpgme_error_t
+gpg_get_aliases (void *engine)
+{
+  engine_gpg_t gpg = engine;
+  gpgme_error_t err;
+
+  err = add_arg (gpg, "--with-colons");
+
+  if (!err)
+    err = add_arg (gpg, "--list-config");
+
+  if (!err)
+    err = add_arg (gpg, "group");
+
+  if (!err)
+    err = start (gpg);
+
+  return err;
+}
 
 static gpgme_error_t
 gpg_keylist_data (void *engine, gpgme_data_t data)
@@ -3484,5 +3503,6 @@ struct engine_ops _gpgme_engine_ops_gpg =
     NULL,		/* cancel_op */
     gpg_passwd,
     gpg_set_pinentry_mode,
-    NULL                /* opspawn */
+    NULL,                /* opspawn */
+    gpg_get_aliases
   };

@@ -160,6 +160,7 @@ struct engine_ops
                             gpgme_data_t dataout,
                             gpgme_data_t dataerr, unsigned int flags);
 
+  gpgme_error_t (*get_aliases) (void *engine);
 };
 
 
